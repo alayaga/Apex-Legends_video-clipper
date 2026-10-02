@@ -187,6 +187,72 @@ def check_ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
+_DURATION_EPSILON = 0.001
+
+
+def _subprocess_no_window_flags() -> int:
+    return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
+def _ffprobe_durations(filepath: str, entries: str) -> list[float] | None:
+    """读取 ffprobe 输出的时长列表。ffprobe 缺失或执行失败时返回 None。"""
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        entries,
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        filepath,
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=_subprocess_no_window_flags(),
+        )
+    except (FileNotFoundError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+
+    values: list[float] = []
+    for line in (result.stdout or "").splitlines():
+        text = line.strip()
+        if not text or text.upper() == "N/A":
+            continue
+        try:
+            value = float(text)
+        except ValueError:
+            continue
+        if value > 0:
+            values.append(value)
+    return values
+
+
+def probe_media_duration(filepath: str) -> float | None:
+    """返回媒体时长（秒）。优先容器时长，否则取各流时长的最大值。"""
+    if shutil.which("ffprobe") is None:
+        return None
+    format_durations = _ffprobe_durations(filepath, "format=duration")
+    if format_durations:
+        return format_durations[0]
+    if format_durations is None:
+        return None
+    stream_durations = _ffprobe_durations(filepath, "stream=duration")
+    if not stream_durations:
+        return None
+    return max(stream_durations)
+
+
+def time_exceeds_duration(seconds: int, duration: float) -> bool:
+    return seconds > duration + _DURATION_EPSILON
+
+
 def seconds_from_hms(hours: str, minutes: str, seconds: str) -> int:
     h = int(hours.strip() or "0")
     m = int(minutes.strip() or "0")
@@ -690,6 +756,24 @@ class VideoCutterApp:
             if err := frame.validate(i):
                 messagebox.showerror("错误", err)
                 return False
+
+        if shutil.which("ffprobe") is None:
+            messagebox.showerror("错误", "未找到 ffprobe。")
+            return False
+        duration = probe_media_duration(input_file)
+        if duration is None:
+            messagebox.showerror("错误", "无法读取视频时长。")
+            return False
+        for i, frame in enumerate(self.clip_frames):
+            start_sec, end_sec = frame.get_times()
+            for label, value in (("起始", start_sec), ("结束", end_sec)):
+                if time_exceeds_duration(value, duration):
+                    messagebox.showerror(
+                        "错误",
+                        f"片段 {i + 1}：{label}时间 {format_duration_display(value)} "
+                        f"超过视频长度 {format_duration_display(int(duration))}",
+                    )
+                    return False
         return True
 
     def _run_ffmpeg_cut(
@@ -704,8 +788,12 @@ class VideoCutterApp:
             str(end_sec),
             "-i",
             input_file,
+            "-map",
+            "0",
             "-c",
             "copy",
+            "-map_metadata",
+            "0",
             "-avoid_negative_ts",
             "make_zero",
             output_file,
@@ -717,7 +805,7 @@ class VideoCutterApp:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=_subprocess_no_window_flags(),
             )
         except FileNotFoundError:
             return False, "未找到 ffmpeg。"

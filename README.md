@@ -80,9 +80,11 @@ SUPPORTED_GAMES = [
 每条片段使用如下命令（参数以列表形式传递给 `subprocess`，正确处理含空格的路径）：
 
 ```text
-ffmpeg -y -ss <起始秒> -to <结束秒> -i "<输入文件>" -c copy -avoid_negative_ts make_zero "<输出文件>"
+ffmpeg -y -ss <起始秒> -to <结束秒> -i "<输入文件>" -map 0 -c copy -map_metadata 0 -avoid_negative_ts make_zero "<输出文件>"
 ```
 
+- `-map 0`：拷贝全部视频、音轨与其他流
+- `-map_metadata 0`：拷贝容器元数据
 - `-c copy`：流拷贝，**不重新编码**
 - 因关键帧位置，实际切点可能相对设定时间略有偏移，属流拷贝模式的正常现象
 
@@ -90,6 +92,7 @@ ffmpeg -y -ss <起始秒> -to <结束秒> -i "<输入文件>" -c copy -avoid_neg
 
 - 时、分、秒须为非负整数
 - 结束时间必须大于起始时间
+- 起始或结束时间超过视频实际长度时会提示错误，不开始裁剪
 - 输入文件须存在；输出目录不存在时会尝试自动创建
 
 ## 项目结构
