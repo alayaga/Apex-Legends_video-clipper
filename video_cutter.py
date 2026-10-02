@@ -15,6 +15,7 @@ SUPPORTED_GAMES = [
     "Apex Legends",
     "Counter-strike 2",
     "Helltaker",
+    "How to Fish",
 ]
 
 COLORS = {
